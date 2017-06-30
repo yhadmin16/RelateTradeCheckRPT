@@ -1,0 +1,164 @@
+SELECT T1.T1_PKGROUP,
+       CASE
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0101',
+                                         '0102',
+                                         '0103',
+                                         '0104',
+                                         '0105',
+                                         '0401',
+                                         '0405',
+                                         '0501') THEN
+          '原材料'
+         WHEN SUBSTR(BMC.CODE, 1, 6) IN ('020104') THEN
+          '混养料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0201') AND
+              SUBSTR(BMC.CODE, 1, 6) NOT IN ('020104') THEN
+          '虾料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0202') THEN
+          '高档海水膨化料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0203') THEN
+          '高档海水淡水料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0205') THEN
+          '低档海水膨化料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0206') THEN
+          '沉水鱼料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0207') THEN
+          '畜禽料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0301', '0302', '0303') THEN
+          '预混料'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0502') THEN
+          '产成品'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0402') THEN
+          '生物制剂'
+         WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0504') THEN
+          '包装袋'
+         ELSE
+          BMC.CODE
+       END PINZHONG,
+       SUM(T1.T1_ZHEHOUNOTAXJE) SHOURU,
+       SUM(T1.T1_CHENGBEN) CHENGBEN,
+       SUM(T1.T1_ZHEHOUNOTAXJE) - SUM(T1.T1_CHENGBEN) MAOLI,
+       DECODE(SUM(T1.T1_ZHEHOUNOTAXJE),
+              0,
+              0,
+              NULL,
+              0,
+              (SUM(T1.T1_ZHEHOUNOTAXJE) - SUM(T1.T1_CHENGBEN)) /
+              SUM(T1.T1_ZHEHOUNOTAXJE)) RATE_MAOLI
+  FROM ((SELECT SSIB.PK_GROUP T1_PKGROUP,
+                OFO.NAME T1_FINNAME,
+                BC.NAME T1_CUSTOMERNAME,
+                BM.PK_MARBASCLASS T1_PK_MARBASCLASS,
+                BM.CODE T1_MATERCODE,
+                BM.NAME T1_MATERNAME,
+                SUM(DECODE(SSIB.NNUM, '~', 0, NULL, 0, SSIB.NNUM)) T1_NNUM,
+                SUM(DECODE(SSIB.NORIGMNY, '~', 0, NULL, 0, SSIB.NORIGMNY) -
+                    TO_NUMBER(DECODE(SSIB.VBDEF2,
+                                     '~',
+                                     0,
+                                     NULL,
+                                     0,
+                                     SSIB.VBDEF2))) T1_ZHEHOUNOTAXJE,
+                SUM(DECODE(IIBB.NMNY, '~', 0, NULL, 0, IIBB.NMNY)) T1_CHENGBEN
+           FROM SO_SALEINVOICE_B SSIB
+           LEFT JOIN IA_I5BILL_B IIBB
+             ON IIBB.CICITEMID = SSIB.CSRCBID
+            AND IIBB.DR = 0
+           LEFT JOIN ORG_FINANCEORG OFO
+             ON SSIB.PK_ORG = OFO.PK_FINANCEORG
+          INNER JOIN BD_CUSTOMER BC
+             ON SSIB.CRECEIVECUSTID = BC.PK_CUSTOMER
+            AND BC.CUSTPROP = 1
+           LEFT JOIN BD_MATERIAL BM
+             ON SSIB.CMATERIALVID = BM.PK_MATERIAL
+          WHERE SSIB.DR = 0
+            AND SUBSTR(SSIB.DBILLDATE, 1, 7) IN (PARAMETER('kjdate'))
+            AND OFO.CODE IN (PARAMETER('sellercode'))
+            AND BC.CODE IN (parameter('buyercode'))
+          GROUP BY SSIB.PK_GROUP,
+                   OFO.NAME,
+                   BC.NAME,
+                   BM.PK_MARBASCLASS,
+                   BM.CODE,
+                   BM.NAME) UNION ALL
+        (SELECT TSLBB.PK_GROUP PK_GROUP,
+                OFO2.NAME DBCKZZ,
+                OFO.NAME DBRKZZ,
+                BM.PK_MARBASCLASS WLPK,
+                BM.CODE WLBM,
+                BM.NAME WL,
+                DECODE(TSLB.NNUMBER, '~', 0, NULL, 0, TSLB.NNUMBER) ZSL,
+                DECODE(TSLB.NORIGTAXMNY, '~', 0, NULL, 0, TSLB.NORIGTAXMNY) JE,
+                DECODE(IIBB.NMNY, '~', 0, NULL, 0, IIBB.NMNY) CBJE
+           FROM TO_SETTLELIST_BB TSLBB
+           LEFT JOIN TO_SETTLELIST_B TSLB
+             ON TSLBB.CBILL_BID = TSLB.CBILL_BID
+           LEFT JOIN TO_SETTLELIST TSL
+             ON TSLB.CBILLID = TSL.CBILLID
+           LEFT JOIN BD_MATERIAL BM
+             ON TSLB.CINVENTORYID = BM.PK_MATERIAL
+           LEFT JOIN ORG_FINANCEORG OFO
+             ON TSL.CTARGETFIORGID = OFO.PK_FINANCEORG
+           LEFT JOIN ORG_FINANCEORG OFO2
+             ON TSL.PK_ORG = OFO2.PK_FINANCEORG
+           LEFT JOIN BD_MARBASCLASS BMC
+             ON BM.PK_MARBASCLASS = BMC.PK_MARBASCLASS
+           LEFT JOIN (SELECT TSLBB.CBILL_BBID CBILL_BBID,
+                            SUM(IIBB.NNUM) NNUM,
+                            SUM(IIBB.NMNY) NMNY
+                       FROM IA_IJBILL_B IIBB
+                       LEFT JOIN TO_SETTLELIST_BB TSLBB
+                         ON IIBB.CSRCBID = TSLBB.CBILL_BBID
+                      GROUP BY TSLBB.CBILL_BBID) IIBB
+             ON TSLBB.CBILL_BBID = IIBB.CBILL_BBID
+          RIGHT JOIN IA_IJBILL_B IIBB2
+             ON IIBB2.CSRCBID = TSLBB.CBILL_BBID
+           JOIN IA_IJBILL IIB
+             ON IIBB2.CBILLID = IIB.CBILLID
+           LEFT JOIN BD_STORDOC BSD
+             ON BSD.PK_STORDOC = IIB.CSTORDOCID
+          WHERE TSLBB.DR = 0
+            AND IIBB2.DR = 0
+            AND SUBSTR(TSL.DBILLDATE, 1, 7) IN (PARAMETER('kjdate'))
+            AND OFO2.CODE IN (PARAMETER('sellercode'))
+            AND OFO.CODE IN (parameter('buyercode')))) T1
+  LEFT JOIN BD_MARBASCLASS BMC
+    ON T1.T1_PK_MARBASCLASS = BMC.PK_MARBASCLASS
+ GROUP BY T1.T1_PKGROUP,
+          CASE
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN
+                 ('0101',
+                  '0102',
+                  '0103',
+                  '0104',
+                  '0105',
+                  '0401',
+                  '0405',
+                  '0501') THEN
+             '原材料'
+            WHEN SUBSTR(BMC.CODE, 1, 6) IN ('020104') THEN
+             '混养料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0201') AND
+                 SUBSTR(BMC.CODE, 1, 6) NOT IN ('020104') THEN
+             '虾料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0202') THEN
+             '高档海水膨化料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0203') THEN
+             '高档海水淡水料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0205') THEN
+             '低档海水膨化料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0206') THEN
+             '沉水鱼料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0207') THEN
+             '畜禽料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0301', '0302', '0303') THEN
+             '预混料'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0502') THEN
+             '产成品'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0402') THEN
+             '生物制剂'
+            WHEN SUBSTR(BMC.CODE, 1, 4) IN ('0504') THEN
+             '包装袋'
+            ELSE
+             BMC.CODE
+          END
