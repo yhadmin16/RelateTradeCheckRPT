@@ -1,0 +1,207 @@
+SELECT NVL(T1.T1_PKGROUP, T2.T2_PKGROUP) PK_GROUP,
+       T1.T1_FINNAME,
+       T1.T1_CUSTOMERNAME,
+       T1.T1_MATERCODE,
+       T1.T1_MATERNAME,
+       NVL(T1.T1_NNUM, 0) T1_NNUM,
+       NVL(T1.T1_ZHEHOUNOTAXJE, 0) T1_ZHEHOUNOTAXJE,
+       NVL(T1.T1_CHENGBEN, 0) T1_CHENGBEN,
+       NVL(T1.T1_SHUIE,0) T1_SHUIE,
+       T2.*
+  FROM (SELECT T3.T1_PKGROUP,
+               T3.T1_FINNAME,
+               T3.T1_CUSTOMERNAME,
+               T3.T1_MATERCODE,
+               T3.T1_MATERNAME,
+               SUM(T1_NNUM) T1_NNUM,
+               SUM(T1_ZHEHOUNOTAXJE) T1_ZHEHOUNOTAXJE,
+               SUM(T1_CHENGBEN) T1_CHENGBEN,
+               SUM(T1_SHUIE) T1_SHUIE
+          FROM ((SELECT SSIB.PK_GROUP T1_PKGROUP,
+                        OFO.NAME T1_FINNAME,
+                        BC.NAME T1_CUSTOMERNAME,
+                        BM.CODE T1_MATERCODE,
+                        BM.NAME T1_MATERNAME,
+                        SUM(DECODE(SSIB.NNUM, '~', 0, NULL, 0, SSIB.NNUM)) T1_NNUM,
+                        SUM(DECODE(SSIB.NORIGMNY,
+                                   '~',
+                                   0,
+                                   NULL,
+                                   0,
+                                   SSIB.NORIGMNY) -
+                            TO_NUMBER(DECODE(SSIB.VBDEF2,
+                                             '~',
+                                             0,
+                                             NULL,
+                                             0,
+                                             SSIB.VBDEF2))) T1_ZHEHOUNOTAXJE,
+                        SUM(DECODE(IIBB.NMNY, '~', 0, NULL, 0, IIBB.NMNY)) T1_CHENGBEN,
+                        SUM(ROUND(nvl(NORIGTAXMNY,0)-decode(SSIB.VBDEF2,'~',0,null,0,SSIB.VBDEF2), 2)-ROUND((nvl(NORIGTAXMNY,0)-decode(SSIB.VBDEF2,'~',0,null,0,SSIB.VBDEF2))/(1+nvl(NTAXRATE,0)/100), 2)) T1_SHUIE
+                   FROM SO_SALEINVOICE_B SSIB
+                   LEFT JOIN IA_I5BILL_B IIBB
+                     ON IIBB.CICITEMID = SSIB.CSRCBID
+                    AND IIBB.DR = 0
+                   LEFT JOIN ORG_FINANCEORG OFO
+                     ON SSIB.PK_ORG = OFO.PK_FINANCEORG
+                  INNER JOIN BD_CUSTOMER BC
+                     ON SSIB.CRECEIVECUSTID = BC.PK_CUSTOMER
+                    AND BC.CUSTPROP = 1
+                   LEFT JOIN BD_MATERIAL BM
+                     ON SSIB.CMATERIALVID = BM.PK_MATERIAL
+                  WHERE SSIB.DR = 0
+                    AND SUBSTR(SSIB.DBILLDATE, 1, 7) IN (PARAMETER('kjdate'))
+                    AND OFO.CODE IN (parameter('sellercode'))
+                    AND BC.CODE IN (parameter('buyercode'))
+                  GROUP BY SSIB.PK_GROUP, OFO.NAME, BC.NAME, BM.CODE, BM.NAME)
+                UNION ALL
+                (select tslbb.pk_group pk_group,
+                        ofo2.name dbckzz,
+                        ofo.name dbrkzz,
+                        bm.code wlbm,
+                        bm.name wl,
+                        DECODE(tslb.nnumber, '~', 0, NULL, 0, tslb.nnumber) zsl,
+                        DECODE(tslb.norigtaxmny,
+                               '~',
+                               0,
+                               NULL,
+                               0,
+                               tslb.norigtaxmny) je,
+                        DECODE(iibb.nmny, '~', 0, NULL, 0, iibb.nmny) cbje,
+                        0 shuie
+                   from to_settlelist_bb tslbb
+                   left join to_settlelist_b tslb
+                     on tslbb.cbill_bid = tslb.cbill_bid
+                   left join to_settlelist tsl
+                     on tslb.cbillid = tsl.cbillid
+                   left join bd_material bm
+                     on tslb.cinventoryid = bm.pk_material
+                   left join org_financeorg ofo
+                     on tsl.ctargetfiorgid = ofo.pk_financeorg
+                   left join org_financeorg ofo2
+                     on tsl.pk_org = ofo2.pk_financeorg
+                   left join bd_marbasclass bmc
+                     on bm.pk_marbasclass = bmc.pk_marbasclass
+                   left join (select tslbb.cbill_bbid cbill_bbid,
+                                    sum(iibb.nnum) nnum,
+                                    sum(iibb.nmny) nmny
+                               from ia_ijbill_b iibb
+                               left join to_settlelist_bb tslbb
+                                 on iibb.csrcbid = tslbb.cbill_bbid
+                              group by tslbb.cbill_bbid) IIBB
+                     ON TSLBB.CBILL_BBID = IIBB.CBILL_BBID
+                  right join ia_ijbill_b iibb2
+                     on iibb2.csrcbid = tslbb.cbill_bbid
+                   join ia_ijbill iib
+                     on iibb2.cbillid = iib.cbillid
+                   left join bd_stordoc bsd
+                     on bsd.pk_stordoc = iib.cstordocid
+                  where tslbb.dr = 0
+                    and iibb2.dr = 0
+                    AND substr(tsl.dbilldate, 1, 7) IN (PARAMETER('kjdate'))
+                    AND OFO2.CODE IN (parameter('sellercode'))
+                    AND OFO.CODE IN (parameter('buyercode')))) t3
+         GROUP BY T3.T1_PKGROUP,
+                  T3.T1_FINNAME,
+                  T3.T1_CUSTOMERNAME,
+                  T3.T1_MATERCODE,
+                  T3.T1_MATERNAME) T1
+  full JOIN (SELECT T3.T2_PKGROUP,
+                    T3.T2_FINNAME, /*入库组织*/
+                    T3.T2_SUPPLIERNAME, /*供应商*/
+                    T3.T2_MATERCODE,
+                    T3.T2_MATERNAME,
+                    SUM(T2_SUMNNUM) T2_SUMNNUM,
+                    SUM(T2_SUMNMNY) T2_SUMNMNY,
+                    SUM(T2_SHUIE)   T2_SHUIE
+               FROM ((SELECT IPIB.PK_GROUP T2_PKGROUP,
+                             OSO.NAME T2_FINNAME,
+                             BSUP.NAME T2_SUPPLIERNAME,
+                             BMV.CODE T2_MATERCODE,
+                             BMV.NAME T2_MATERNAME,
+                             SUM(NVL(IPIB.NNUM, 0)) T2_SUMNNUM,
+                             SUM(NVL(IPIB.NNUM, 0) *
+                                 NVL(IPIB.NORIGTAXPRICE, 0) -
+                                 NVL(IPIB.NORIGTAXPRICE, 0) *
+                                 (NVL(IPIB.NTAXRATE, 0) /
+                                  (100 + NVL(IPIB.NTAXRATE, 0))) *
+                                 NVL(IPIB.NNUM, 0)) T2_SUMNMNY,
+                             SUM(NVL(IPIB.NORIGTAXPRICE, 0) *
+                                 (NVL(IPIB.NTAXRATE, 0) /
+                                  (100 + NVL(IPIB.NTAXRATE, 0))) *
+                                 NVL(IPIB.NNUM, 0))  T2_SHUIE    
+                        FROM IC_PURCHASEIN_B IPIB
+                       INNER JOIN IC_PURCHASEIN_H IPIH
+                          ON IPIB.CGENERALHID = IPIH.CGENERALHID
+                         AND IPIH.DR = 0
+                       INNER JOIN BD_SUPPLIER BSUP
+                          ON IPIH.CVENDORID = BSUP.PK_SUPPLIER
+                         AND BSUP.SUPPROP = 1
+                       INNER JOIN BD_MATERIAL_V BMV
+                          ON IPIB.CMATERIALVID = BMV.PK_SOURCE
+                       INNER JOIN ORG_STOCKORG OSO
+                          ON IPIH.PK_ORG = OSO.PK_STOCKORG
+                       WHERE IPIB.DR = 0
+                         AND SUBSTR(IPIB.DBIZDATE, 1, 7) IN
+                             (PARAMETER('kjdate'))
+                         AND BSUP.CODE IN (PARAMETER('sellercode'))
+                         AND OSO.CODE IN (PARAMETER('buyercode'))
+                       GROUP BY IPIB.PK_GROUP,
+                                OSO.NAME,
+                                BSUP.NAME,
+                                BMV.CODE,
+                                BMV.NAME) UNION ALL
+                     (select tslbb.pk_group pk_group,
+                             ofo.name dbrkzz,
+                             ofo2.name dbckzz,
+                             bm.code wlbm,
+                             bm.name wl,
+                             DECODE(tslb.nnumber,
+                                    '~',
+                                    0,
+                                    NULL,
+                                    0,
+                                    tslb.nnumber) zsl,
+                             DECODE(iibb.nmny, '~', 0, NULL, 0, iibb.nmny) cbje,
+                             0 shuie
+                        from to_settlelist_bb tslbb
+                        left join to_settlelist_b tslb
+                          on tslbb.cbill_bid = tslb.cbill_bid
+                        left join to_settlelist tsl
+                          on tslb.cbillid = tsl.cbillid
+                        left join bd_material bm
+                          on tslb.cinventoryid = bm.pk_material
+                        left join org_financeorg ofo
+                          on tsl.ctargetfiorgid = ofo.pk_financeorg
+                        left join org_financeorg ofo2
+                          on tsl.pk_org = ofo2.pk_financeorg
+                        left join bd_marbasclass bmc
+                          on bm.pk_marbasclass = bmc.pk_marbasclass
+                        left join (select tslbb.cbill_bbid cbill_bbid,
+                                         sum(iibb.nnum) nnum,
+                                         sum(iibb.nmny) nmny
+                                    from ia_iibill_b iibb
+                                    left join to_settlelist_bb tslbb
+                                      on iibb.csrcbid = tslbb.cbill_bbid
+                                   group by tslbb.cbill_bbid) IIBB
+                          ON TSLBB.CBILL_BBID = IIBB.CBILL_BBID
+                       right join ia_iibill_b iibb2
+                          on iibb2.csrcbid = tslbb.cbill_bbid
+                        join ia_iibill iib
+                          on iibb2.cbillid = iib.cbillid
+                        left join bd_stordoc bsd
+                          on bsd.pk_stordoc = iib.cstordocid
+                       where tslbb.dr = 0
+                         and iibb2.dr = 0
+                         AND substr(tsl.dbilldate, 1, 7) IN
+                             (PARAMETER('kjdate'))
+                         AND OFO2.CODE IN (parameter('sellercode'))
+                         AND OFO.CODE IN (parameter('buyercode')))) T3
+              GROUP BY T3.T2_PKGROUP,
+                       T3.T2_FINNAME,
+                       T3.T2_SUPPLIERNAME,
+                       T3.T2_MATERCODE,
+                       T3.T2_MATERNAME
+              ORDER BY T3.T2_SUPPLIERNAME) T2
+    ON T1.T1_FINNAME = T2.T2_SUPPLIERNAME
+   AND T1.T1_CUSTOMERNAME = T2.T2_FINNAME
+   AND T1.T1_MATERCODE = T2.T2_MATERCODE
